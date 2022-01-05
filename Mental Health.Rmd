@@ -1,0 +1,944 @@
+---
+title: "FinalProject"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+#install.packages("gridExtra")
+library("gridExtra")
+library(ggplot2)
+library(ggthemes)
+library(devtools)
+devtools::install_github('cttobin/ggthemr')
+library(ggthemr)
+ggthemr("fresh") 
+library(tidyr)
+devtools::install_github('bbc/bbplot')
+library(bbplot)
+```
+
+# Mental Heath - can we predict before things get worse?
+
+```{r include=FALSE}
+df = read.csv("F:/McGill assignments_exercises/Fall/MGSC661/Final proj/Mental Health/survey.csv")
+attach(df)
+```
+
+```{r}
+head(df)
+```
+
+```{r}
+table(str(df))
+
+```
+
+We have in total **1259 observations and 27 variables** that collect the information about the mental health, family history, employment details and more.
+
+Variable "`treatment`" is the target variable that describes if the person has sought treatment for a mental health condition and using the concepts learned in the class, we will be building a classification model that can predict if the person would/should seek treatment even if it's currently not evident to the person.
+
+This prediction model would help people not only seek help before things start getting worse but also help therapists or employers to understand what might cause mental illness and if precautionary steps such as wellness programs or mandatory paid leaves program could be employed to improve their valuable employees mental health.
+
+## 1. Understanding the dataset:
+
+```{r}
+#Summarizing all variables 
+summary(df)
+```
+
+In the first glance, we can see that variable `"Age"` has observations where age is negative or greater than 100
+
+```{r}
+#Finding the null values 
+colSums(is.na(df)) 
+```
+
+1.  Variable `Age` has incorrect values that needs to be corrected or dropped
+
+2.  There are a lot of missing values in columns `comments, work_interfere, state` therefore these columns will be dropped since they won't provide much information. Also, there are some observations where `self-employed` has null value that need to be dropped before building the model.
+
+## 2. Data Cleaning and Feature Engineering
+
+### 2.1 Age
+
+`Age` variable has many outliers that have `Age` value \<0 and \>100.
+
+```{r fig.width=4 fig.height=3, echo=FALSE}
+box_plot <- ggplot(df, aes(x = treatment, y = Age)) + 
+            geom_boxplot(
+              
+              outlier.colour="red",
+              outlier.fill="red"
+            ) + 
+            labs(
+              x="Treatment", 
+              y="", 
+              title="Distribution of Age", 
+              subtitle="Understanding the distribution of age of participants") +
+  theme(
+
+        panel.background = element_blank(),
+        panel.grid  = element_blank(),
+       line = element_blank()) 
+box_plot
+
+```
+
+For model building, we only considered the age group teenagers and above. The max age we considered for the model was 75 years old ( average max age) and the rest observations were dropped. The total number of observations left are 1251.
+
+```{r include=FALSE}
+df = df[(Age>18 & Age<75),]
+attach(df)
+```
+
+```{r fig.width=9, fig.height=5, echo=FALSE}
+# Draw the boxplot and the histogram 
+box_plot <- ggplot(df, aes(x = treatment, y = Age)) + 
+            geom_boxplot(
+              
+              outlier.colour="red",
+              outlier.fill="red"
+            )+bbc_style() + 
+            labs(
+              x="Treatment", 
+              y="", 
+              title="Distribution of Age", 
+              subtitle="Understanding the distribution of age of participants") +
+  theme(
+
+        panel.background = element_blank(),
+        panel.grid  = element_blank(),
+       line = element_blank()) +  theme(plot.subtitle=element_text(size=14, face="italic", color="black"))
+
+
+hist_plot <- ggplot(df, aes(x =Age)) + 
+            geom_histogram(bins=10)+bbc_style() + 
+            labs(x="Age", title="", y="Number of participants")+
+   scale_x_continuous(breaks=seq(15,100,10))
+
+grid.arrange( box_plot,hist_plot, nrow=1 )
+
+```
+
+```{r}
+summary(Age)
+```
+
+### 2.2 Dropping nulls and almost empty columns
+
+Dropping all null values and columns which have more than 200 observations as null.
+
+```{r include=FALSE}
+df= df[,-c(1,5, 9, 23,24,27)]
+df= df[complete.cases(df),]
+attach(df)
+
+```
+
+We are now left with 1233 observations and 21 variables.
+
+### 2.3 Gender
+
+Also, the `Gender` column has multiple values for each gender and includes LGBTQ+ gender terms as well. These terms were combined in three Gender terms -- Male, Female and Queer
+
+```{r echo=TRUE}
+unique(df[c("Gender")])
+```
+
+```{r}
+#Making Gender values consistent
+# Create the list of three categories
+Male <- c("Male ","Cis Man", "Malr", "Male", "male", "M", "m", "Male-ish", "maile", "Mal", "Male (CIS)", "Cis Male", "Make", "Male", "Man", "msle", "Mail", "cis male")
+Female <- c("Female ","femail","Female (cis)","female","Female","F","Woman","f","Femake","woman","Female","cis-female/femme", "Cis Female", "Trans-female", "Female (trans)", "Trans woman")
+Queer <-c ("ostensibly male, unsure what that really means","p","A little about you","queer","Neuter","something kinda male?","non-binary","Nah","All","Enby","fluid","Genderqueer","Androgyne","Agender","Guy (-ish) ^_^","male leaning androgynous", "queer/she/they")
+
+# Categorize genders
+df$Gender <- sapply(
+  as.vector(df$Gender),
+  function(x) if(x %in% Male) "Male" else x ) 
+
+df$Gender <- sapply(
+  as.vector(df$Gender),
+  function(x) if(x %in% Female) "Female" else x ) 
+
+df$Gender <- sapply(
+  as.vector(df$Gender),
+  function(x) if(x %in% Queer) "Queer" else x ) 
+df$Gender <- as.factor(df$Gender)
+
+```
+
+## 3. Univariate & Multivariate Analysis
+
+### 3.1 Treatment - Predictor variable
+
+```{r fig.width=9, fig.height=5, echo=FALSE}
+treatment %>% table
+bar_plot <- ggplot(data=df, aes(x=treatment)) +
+            geom_bar() +
+            labs(
+              x="Treatment", 
+              y="Number of Survey Respondents", 
+              title="Distribution of Target Variable - treatment", 
+              subtitle="Plotting the number of survey respondents that have previously sought \ntreatment for mental health illness")+bbc_style() +  theme(plot.subtitle=element_text(size=14, face="italic", color="black"))
+
+bar_plot 
+```
+
+### 3.2 Family History of Mental Illness
+
+```{r fig.width=9, fig.height=5, echo=FALSE}
+family_history %>% table
+bar_plot <- ggplot(data=df, aes(x=family_history)) +
+            geom_bar()  +bbc_style()+
+            labs(
+              x="", 
+              y="Number of Survey Respondents", 
+              title="Effect of Family History", 
+              subtitle="Does having a family history of mental health issues \nmake an employee concious of mental health and \nseek profession help?")+  theme(plot.subtitle=element_text(size=14, face="italic", color="black"))
+
+bar_plot2 <- ggplot(data=df, aes(x=family_history , fill=(treatment))) +
+            geom_bar(position = "fill") +bbc_style()+
+            labs(
+              x="Family History of Mental Illness", y="") 
+grid.arrange(bar_plot, bar_plot2, nrow = 1)
+```
+
+```{r include=FALSE}
+bar_plot <- ggplot(data=df, aes(x=family_history , fill=(treatment))) +
+            geom_bar(position = "fill")  +bbc_style()+
+            labs(
+              x="Had Family history of Mental Illness?", 
+              y="Portion of Survey Respondents", 
+              title="Effect of Family History", 
+              subtitle="Does having a family history of mental health issues make an \nemployee concious of mental health and seek profession help?") + theme(axis.title = element_text(size = 16))
+finalise_plot(plot_name = bar_plot,
+source = "Source: OSMI Mental Health in Tech Survey",
+save_filepath = "FAMIL_HISTORY.png",
+width_pixels = 640,
+height_pixels = 550)
+
+```
+
+We can see that most the the respondents did not have a family history of mental illness but still sought treatment for mental illness. Interestingly, out of 482 respondents who had family history of mental illness, \~ 75% sought treatment.
+
+### 3.3 Age of respondents
+
+```{r fig.width=12, fig.height=5, echo=FALSE}
+dist_plot <- ggplot(data=df, aes(x=Age , fill=(treatment))) +
+            geom_density(alpha=0.5) + bbc_style()+
+            labs(
+              x="Age", 
+              y="", 
+              title="Effect of Age", 
+              subtitle="Plotting the distribution of Age \nof survey respondents") +  theme(plot.subtitle=element_text(size=14, face="italic", color="black"))
+
+df$Age_cat <- cut(df$Age, 
+                   breaks=c(-Inf,12,19, 25,35,Inf), 
+                   labels=c("Kids", "Teens"
+                            
+                            
+                            
+                            
+                            ,"Young", "Adult", "Old"))
+bar_plot1 <- ggplot(data=df, aes(x=Age_cat )) +
+            geom_bar()  +bbc_style()+
+            labs(
+              x="", y="Number of respondents", subtitle="Number of respondents")
+
+bar_plot2 <- ggplot(data=df, aes(x=Age_cat , fill=(treatment))) +
+            geom_bar(position = "fill") +bbc_style()+
+            labs(
+              x="", y="Portion of respondents", subtitle="Sought Treatment") 
+df$Age_cat %>% table
+grid.arrange(dist_plot, bar_plot1, bar_plot2, nrow = 1)
+```
+
+```{r include=FALSE}
+bar_plot <- ggplot(data=df, aes(x=Age_cat , fill=(treatment))) +
+            geom_bar(position = "fill")   +
+            labs(
+              x="How does mental health varies with Age?", 
+              y="Number of Survey Respondents", 
+              title="Effect of Age", 
+              subtitle="How does mental health awareness or a need to seek \ntreatment varies with age?") +bbc_style()
+finalise_plot(plot_name = bar_plot,
+source = "Source: OSMI Mental Health in Tech Survey",
+save_filepath = "AGE.png",
+width_pixels = 640,
+height_pixels = 550)
+
+
+```
+
+`Age` is a continuous variable but for visualization purpose to understand the occurrence of mental illness in different age groups, the data were split into different age groups and Age is treated as a categorical variable. Based on the distribution of Age, there is no significant difference in the treatment sought. The frequencies are almost the same excepting the Junior age group. The Adult age group occupied 56% of 1233 employees. Interestingly, for the senior age group, the mental health issue of employees is serious because the number of people who accepted mental health treatment is higher than of people with untreated.
+
+### 3.4 Gender of respondents
+
+```{r fig.width=9, fig.height=5, echo=FALSE}
+family_history %>% table
+bar_plot <- ggplot(data=df, aes(x=Gender, fill=(tech_company))) +
+            geom_bar(position = "stack") +
+            labs(
+              x="", 
+              y="Number of Survey Respondents", 
+              title="Effect of Gender", 
+              subtitle="Plotting the distribution of survey respondents \ngender wrt treatment and if they \nbelong to tech company")+bbc_style()+  theme(plot.subtitle=element_text(size=14, face="italic", color="black"))
+
+bar_plot2 <- ggplot(data=df, aes(x=Gender , fill=(treatment))) +
+            geom_bar(position = "fill") +
+            labs(
+              x="Gender", y="", subtitle="Sought Treatment") +bbc_style()
+grid.arrange(bar_plot, bar_plot2, nrow = 1)
+```
+
+```{r include=FALSE}
+bar_plot <- ggplot(data=df, aes(x=Gender , fill=(treatment))) +
+            geom_bar(position = "fill")   +
+            labs(
+              x="Effect of Gender", 
+              y="Portion of survery respondents", 
+              title="Effect of Gender", 
+              subtitle="How does mental health awareness or a need to seek \ntreatment varies with gender?") +bbc_style()
+finalise_plot(plot_name = bar_plot,
+source = "Source: OSMI Mental Health in Tech Survey",
+save_filepath = "GENDER.png",
+width_pixels = 640,
+height_pixels = 550)
+
+```
+
+We can see that our dataset has a lot of survey respondents who are male versus other genders. We also have a small portion of Queer-identified respondents. Interestingly,less than 50% of the males have sought treatment whereas the number is much higher for females and queer respondents.
+
+Although the percentage of queer is so low, more than 75% of them have sought treatment, indicating that for the queer population, mental health problems are more serious.
+
+### 3.5 Size of the Company
+
+Would working at a large company entail more work pressure and fierce competition leading to more mental problems?
+
+```{r,fig.height = 7, fig.width =20}
+# ordered no_employees level
+level_order1 <- factor(df$no_employees, levels = c("1-5","6-25","26-100","100-500", "500-1000","More than 1000"))
+n1 <- ggplot(data=df, aes(x=level_order1, fill = (tech_company))) +
+  geom_bar(position = "stack") +
+            labs(
+              x="Company Size", 
+              y="Number of Survey Respondents", 
+              title="Effect of Company Size", 
+              subtitle="Belong to Tech company")+bbc_style()
+# Comparing no_employees treatment ratio
+n2 <- ggplot(data=df, aes(x=level_order1, fill = (treatment))) +
+  geom_bar(position = "fill") +  labs(subtitle="Sought Treatment")+bbc_style()
+
+grid.arrange(n1, n2, nrow = 1)
+```
+
+We can see that the number of people seeking mental health treatment has little to do with the size of the company.
+
+### 3.6 Benefits, Wellness and Care option provided by the Company
+
+```{r fig.width=15, fig.height=6, echo=FALSE}
+bar_plot <- ggplot(data=df, aes(x=benefits, fill=(treatment))) +
+            geom_bar(position = "fill") +bbc_style()+ theme(axis.title = element_text(size = 22))+ theme(legend.position = "none")+
+            labs(
+              x="Does your employer provide \nmental health benefits?", 
+              y="Number of Survey Respondents", 
+              title="Effect of care options", 
+              subtitle="Understanding the awareness in \nemployees working at companies \nthat provide extra care in terms of \nproviding wellness programs,\nbenefits or care options") 
+
+bar_plot2 <- ggplot(data=df, aes(x=wellness_program , fill=(treatment))) +
+            geom_bar(position = "fill") +bbc_style()+ theme(axis.title = element_text(size = 22))+ theme(legend.position = "none")+
+            labs(
+              x="Has your employer ever discussed \nmental health?", y="")
+
+bar_plot3 <- ggplot(data=df, aes(x=care_options , fill=(treatment))) +
+            geom_bar(position = "fill") +bbc_style()+ theme(axis.title = element_text(size = 22))+
+            labs(
+              x="Do you know the options for mental \ncare your employer provides?", y="", subtitle = "Sought Treatment") 
+grid.arrange(bar_plot, bar_plot2,bar_plot3, nrow = 1)
+```
+
+It's interesting to see that employees seek mental health treatment or care more about their mental health when they know their employers offer such options. The reason might be that, companies that do offer such programs also have regular psychological checkups done and therefore employees are more aware about mental health care.
+
+### 3.6 Summary
+
+-   `Family_history`: Those with a family history of mental health are more likely to seek treatment
+
+-   `Age`: Number of respondents seeking psychological consultation grew with age, more than 75% of those above 35 years old sought treatment.
+
+-   `Gender`: Female employees and Queer face more mental health issues compared to cis-male colleagues
+
+Using random forest, we want to see if the importance of these features from visual plots is also noticed by the prediction model to predict if an employee requires extra care.
+
+```{r}
+df$treatment <- as.factor(df$treatment)
+
+```
+
+## 4. Building the model
+
+### 4.1 Building a random forest classification model with 500 trees and using all predictors
+
+```{r}
+#The Base Model
+#install.packages("randomForest") 
+library(randomForest)
+myforest=randomForest(
+  treatment~Age+Gender+Country+self_employed+family_history+no_employees+remote_work+tech_company+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+obs_consequence, ntree=500, data=df, importance=TRUE)
+myforest
+
+
+```
+
+We see that even with basic model, out model performs with an accuracy of 70.64% and the precision and recall seem almost similar. Let's try to improve our model and find the important features for predicting the target variable `treatment`
+
+### 4.2 Finding the optimal Value of number of trees and CP
+
+```{r fig.width=4, fig.height=3, echo=FALSE}
+#Finding the Optimal Value of CP
+library(tree) 
+library(rpart) 
+library(rpart.plot)
+
+overfittedmytree_mental_health= rpart(treatment~ Age+Gender+Country+self_employed+family_history+no_employees+remote_work+tech_company+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+obs_consequence,control=rpart.control(cp=0.0000001))
+plotcp(overfittedmytree_mental_health)
+
+```
+
+```{r}
+opt_cp_mental_health=overfittedmytree_mental_health$cptable[which.min(overfittedmytree_mental_health$cptable[,"xerror"]),"CP"]
+opt_cp_mental_health
+```
+
+Visualising the random forest with the optimal value of CP
+
+```{r fig.width=8, fig.height=5, echo=FALSE}
+optimizedtree_mental_health= rpart(treatment~ Age+Gender+Country+self_employed+family_history+no_employees+remote_work+tech_company+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+obs_consequence,control=rpart.control(cp=opt_cp_mental_health))
+rpart.plot(optimizedtree_mental_health)
+```
+
+Would increasing the number of trees improve the model?
+
+```{r}
+#finding the value of number of trees to reduce the OOBE
+myforest=randomForest(
+  treatment~Age+Gender+Country+self_employed+family_history+no_employees+remote_work+tech_company+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+obs_consequence, ntree=10000, data=df, importance=TRUE,proximity = TRUE, na.action = na.omit, do.trace=1000)
+myforest
+
+```
+
+So, increasing the number of trees have no benefit on reducing the OOBE and therefore doesn't improve the model.
+
+### 4.3 Feature Importance
+
+Which feature are most important to see if a person should seek treatment?
+
+```{r}
+importance(myforest)
+```
+
+```{r fig.width=8, fig.height=5, echo=FALSE}
+varImpPlot(myforest)
+```
+
+1.  Family history and knowing the care options offered by the employer seems to be the most significant factors are determining if the person should/would seek mental care.
+
+2.  The conclusions from the random forest are similar to what we saw during the visualisation in terms of importance of family history of mental health issues and Age in predicting if the employee should attend a therapy session.
+
+3.  Other variables regarding employers such as wellness program availability, company being a tech company or not, employer's focus on mental vs physical etc were not significantly important.
+
+Would dropping these features help us to improve the model?
+
+### 4.4 Building Model using the selected features
+
+```{r}
+featureselected_forest=randomForest(
+  treatment~Age+Gender+family_history+benefits+care_options, ntree=500, data=df, importance=TRUE)
+featureselected_forest
+```
+
+```{r fig.width=4, fig.height=3, echo=FALSE}
+overfittedmy_features_selected= rpart(treatment~Age+Gender+family_history+benefits+care_options,control=rpart.control(cp=0.0000001))
+plotcp(overfittedmy_features_selected)
+
+```
+
+```{r}
+#finding optimal CP value
+opt_cp_feature_selected=overfittedmy_features_selected$cptable[which.min(overfittedmy_features_selected$cptable[,"xerror"]),"CP"]
+#building optimised model
+overfittedmy_features_selected_tree= rpart(treatment~Age+Gender+family_history+benefits+care_options,control=rpart.control(cp=opt_cp_feature_selected))
+#plotting the model
+rpart.plot(overfittedmy_features_selected_tree)
+```
+
+Would increasing the number of trees improve the model?
+
+```{r}
+randomForest(
+  treatment~Age+Gender+family_history+benefits+care_options,ntree=10000, data=df, importance=TRUE,proximity = TRUE, na.action = na.omit, do.trace=1000)
+```
+
+Therefore, increasing the number of trees does not improve the accuracy any more.
+
+## 5. Predicting on Test sample
+
+### 5.1 Splitting the data in train and test - 80-20
+
+Since we have small dataset, we want to have enough observations in training split therefore the split is 80-20
+
+```{r}
+library(caret)
+set.seed(100)
+index = createDataPartition(df$treatment, p = 0.80, list = FALSE)
+df.train = df[index, ]
+df.test = df[-index, ]
+
+```
+
+### 5.2 Training on the train split
+
+```{r}
+rf.trained <- randomForest(treatment~Age+Gender+family_history+benefits+care_options, data = df.train, ntree = 500, importance = TRUE)
+print(rf.trained)
+
+```
+
+OBB estimate of the error is \~31%
+
+### 5.3 Predicting on the test split
+
+```{r}
+# Predicting on test split set
+pred_test <- predict(rf.trained, df.test, type = "class")
+# Checking classification accuracy
+mean(pred_test == df.test$treatment)
+
+```
+
+**Prediction accuracy is around 70% , i.e out of 100 employees that sought mental care treatment, our model could accurately predict 70 of them.**
+
+### 5.4 Measuring the performance
+
+#### 5.4.1 Performance using all features.
+
+```{r}
+
+rf_all_features.trained <- randomForest( treatment~Age+Gender+Country+self_employed+family_history+no_employees+remote_work+tech_company+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+obs_consequence, data = df.train, ntree = 500, importance = TRUE)
+#install.packages("ROCR")
+library(ROCR)
+library(ipred)
+rf_all_predicted = predict(rf_all_features.trained, type = "prob", newdata = df.test)
+forest_all_pred = prediction(rf_all_predicted[,2], df.test$treatment)
+forest_all_perf <- performance(forest_all_pred,"tpr","fpr")
+forest_all_perf2 <- performance(forest_all_pred,measure = "auc")
+plot(forest_all_perf, main="ROC", colorize=T)
+plot(forest_all_perf, col=3, add=TRUE)
+
+```
+
+```{r}
+#AUC Score 
+as.numeric(forest_all_perf2@y.values)
+```
+
+**The Area under the curve is 76%**
+
+#### 5.4.2 Performance using only selected features.
+
+```{r}
+rf_predicted = predict(rf.trained, type = "prob", newdata = df.test)
+forestpred = prediction(rf_predicted[,2], df.test$treatment)
+forestperf <- performance(forestpred,"tpr","fpr")
+forestperf2 <- performance(forestpred,measure = "auc")
+
+plot(forestperf, main="ROC", colorize=T)
+plot(forestperf, col=2, add=TRUE)
+plot(forest_all_perf, col=1, add=TRUE)
+legend(0.5, 0.5, c( 'Using all features','Using only selected features'), 1:2)
+abline(0, 1,lty=2)
+```
+
+```{r}
+#AUC Score 
+as.numeric(forestperf2@y.values)
+```
+
+**The Area under the curve is 73.6% .** Therefore, using all the features leads to a better model but we can probably reduce the dimensions using PCA.
+
+### 
+
+## 6. Comparing other models
+
+Our random forest doesn't perform exceptionally well and there is room for improvement. Therefore, we want to see how does it compare to other classification models like Boosted tree or Logistic regression. Also, we want to see if using Principal component Analysis (PCA) would help us in better feature selection compared to manual/random forest.
+
+### 6.1 Comparing Bagged Classification trees
+
+```{r}
+bag.trained <- bagging(treatment~Age+Gender+self_employed+family_history+no_employees+remote_work+tech_company+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+obs_consequence, data = df.train, coob=T)
+print(bag.trained)
+
+```
+
+The bagged classification trees performed worse than the Random forest. The OOB error increased from \~30% to 34%
+
+```{r}
+df.test.bag.prob = predict(bag.trained, type = "prob", newdata = df.test)
+bagpred = prediction(df.test.bag.prob[,2], df.test$treatment)
+bagperf = performance(bagpred, "tpr", "fpr")
+bagperf2 <- performance(bagpred,measure = "auc")
+plot(bagperf, main="ROC", colorize=T)
+plot(bagperf, col=2, add=TRUE)
+auc.curve = performance(bagpred, "auc")
+
+```
+
+```{r}
+#AUC Score 
+as.numeric(bagperf2@y.values)
+
+```
+
+### 6.2 Comparing Logistic Regression
+
+```{r}
+lm_train <- glm(treatment~Age+Gender+self_employed+family_history+no_employees+remote_work+tech_company+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+obs_consequence, data = df.train, family = "binomial")
+df.test$predict_probs <- predict(lm_train, df.test, type = "response")
+df.test$predict <- ifelse(df.test$predict_probs < 0.5, "No", "Yes")
+cm_test <- table(df.test$treatment, df.test$predict, dnn = c("real", "predict"))
+cm_test
+
+```
+
+```{r}
+prob=predict(lm_train,type="response", newdata = df.test)
+lrpred = prediction(prob, df.test$treatment)
+lrperf <- performance(lrpred,"tpr","fpr")
+lrperf2 <- performance(lrpred,measure = "auc")
+plot(lrperf, main="ROC", colorize=T)
+plot(lrperf, col=3, add=TRUE)
+```
+
+```{r}
+#AUC Score 
+as.numeric(lrperf2@y.values)
+```
+
+**Area under the curve improved to 78%**
+
+```{r}
+plot(forestperf, main="ROC", colorize=T)
+plot(forestperf, col=3, add=TRUE)
+plot(lrperf, col=1, add=TRUE)
+plot(bagperf, col=2, add=TRUE)
+legend(0.6, 0.6, c( 'Logistic Model','Bagged trees', 'Random Forest'), 1:3)
+abline(0, 1,lty=2)
+
+```
+
+### 6.3 Feature Selection using PCA
+
+Since PCA is designed to accept continuous variables, we transform all such columns to a numeric value.
+
+```{r}
+#Creating a copy of df
+df1 <- data.frame(df)
+
+#We first factor the variables to help remove automatic insertion of NA while transforming it to a numeric value
+
+df1$Gender <- as.factor(df1$Gender)
+df1$Country <- as.factor(df1$Country)
+df1$remote_work <- as.factor(df1$remote_work)
+
+df1$benefits <- as.factor(df1$benefits)
+df1$care_options <- as.factor(df1$care_options)
+df1$wellness_program <- as.factor(df1$wellness_program)
+df1$seek_help <- as.factor(df1$seek_help)
+df1$anonymity <- as.factor(df1$anonymity)
+df1$leave <- as.factor(df1$leave)
+df1$phys_health_consequence <- as.factor(df1$phys_health_consequence)
+df1$mental_health_consequence <- as.factor(df1$mental_health_consequence)
+df1$coworkers <- as.factor(df1$coworkers)
+df1$supervisor <- as.factor(df1$supervisor)
+df1$mental_vs_physical <- as.factor(df1$mental_vs_physical)
+df1$no_employees <- as.factor(df1$no_employees)
+
+
+df1$Gender <- as.numeric(df$Gender)
+
+df1$self_employed_cat[df1$self_employed == "Yes"] <- 1
+df1$self_employed_cat[df1$self_employed == "No"] <- 0
+
+df1$family_history_cat[df1$family_history == "Yes"] <- 1
+df1$family_history_cat[df1$family_history == "No"] <- 0
+
+df1$treatment_cat[df1$treatment == "Yes"] <- 1
+df1$treatment_cat[df1$treatment == "No"] <- 0
+
+
+df1$remote_work_cat[df1$remote_work == "Yes"] <- 1
+df1$remote_work_cat[df1$remote_work == "No"] <- 0
+
+
+df1$tech_company_cat[df1$tech_company == "Yes"] <- 1
+df1$tech_company_cat[df1$tech_company == "No"] <- 0
+
+
+df1$obs_consequence_cat[df1$obs_consequence == "Yes"] <- 1
+df1$obs_consequence_cat[df1$obs_consequence == "No"] <- 0
+
+df1$benefits <- as.numeric(df1$benefits)
+df1$care_options <- as.numeric(df1$care_options)
+df1$wellness_program <- as.numeric(df1$wellness_program)
+df1$seek_help <- as.numeric(df1$seek_help)
+df1$anonymity <- as.numeric(df1$anonymity)
+df1$leave <- as.numeric(df1$leave)
+df1$phys_health_consequence <- as.numeric(df1$phys_health_consequence)
+df1$mental_health_consequence <- as.numeric(df1$mental_health_consequence)
+df1$coworkers <- as.numeric(df1$coworkers)
+df1$supervisor <- as.numeric(df1$supervisor)
+df1$mental_vs_physical <- as.numeric(df1$mental_vs_physical)
+df1$no_employees <- as.numeric(df1$no_employees)
+df1$country <- as.numeric(df1$Country)
+```
+
+```{r include=FALSE}
+attach(df1)
+colnames(df1)
+df2=df1[, sapply(df1, class) == "numeric" ]
+```
+
+```{r}
+#Applying PCA
+pca=prcomp(df2, scale=TRUE)
+pca
+
+```
+
+On observing the 1st principal component that contains the most important features, as the absolute value of anonymity, seek_help, benefits, care_options and wellness_program are the highest, they are the variables that largely contribute to determining the outcome, of whether a person would/should seek help for mental well-being. As these variables' values are in the same direction i.e. they have a negative coefficient, they are highly correlated. For the 2nd principal component, superviors and co-workers being approachable to talk to have been deemed to largely contribute towards determining the outcome, given that their absolute values are the highest. Similarly, for the 3rd principal component, self_employed_cat, remote_work_cat and supervisors contribute largely towards the outcome.
+
+Should we consider just 2 principal components or 3 or more?
+
+```{r fig.width=4, fig.height=3 echo=TRUE}
+pve=(pca$sdev^2)/sum(pca$sdev^2)
+pve
+par(mfrow=c(1,2))
+plot(pve, ylim=c(0,1))
+plot(cumsum(pve), ylim=c(0,1))
+
+```
+
+To get the exact values of accuracy, we can add up values in the output displayed above in the console to get the accuracy when x no. of components are used. For eg, 1 component gives an accuracy of 0.13, 2 components gives an accuracy of 0.13+0.10=0.23, 3 components gives you an accuracy of 0.23+0.07=0.3 and so forth.
+
+On observing the above graph and the pca output, the 1st 3 components covers variables with maximum variance , hence, lets consider 3 principal components in future.
+
+Lets plot the 1st 3 components given that we are using 3 components
+
+```{r}
+# install.packages("pca3d")
+library(pca3d)
+gr <- factor(df2[,17])
+pca3d(pca, group=gr)
+snapshotPCA3d(file="first_plot.png")
+
+```
+
+To better visualize the variance and correlation, lets plot the 1st 2 components using autoplot() that consists of the most important features that helps determine the target variable.
+
+```{r fig.width=10, fig.height=10}
+
+#install.packages("ggfortify")
+library(ggfortify)
+
+autoplot(pca, data = df2, columns=1:3, loadings = TRUE, col=ifelse(df1$treatment_cat==1,"green","blue"), loadings.label = TRUE )
+
+```
+
+Based on the above plot, we observe benefits, wellness_program, obs_consequence_cat, family_history_cat, mental_health_consequence, seek_help, care_options,anonymity, mental_vs_physical to be highly significant towards determining whether a person should be treated or not.
+
+#### 6.3.1 Using PCA with Logistic Regression
+
+Since the logistic regression outperformed other models, we want to see how Logistic Regression performs using the selected features from PCA and observe the model's performance accordingly.
+
+We shall now split the dataset into training and testing datasets to predict the performance of the model
+
+```{r}
+set.seed(100)
+index = createDataPartition(df1$treatment_cat, p = 0.80, list = FALSE)
+df1.train = df1[index, ]
+df1.test = df1[-index, ]
+
+```
+
+We shall now train and test our model using the features selected as a result of PCA
+
+```{r}
+
+lm_train_pca_final <- glm(treatment~ anonymity+benefits+seek_help+family_history_cat+obs_consequence_cat+wellness_program+care_options, data = df1.train, family = "binomial")
+
+
+df1.test$predict_probs <- predict(lm_train_pca_final, df1.test, type = "response")
+df1.test$predict <- ifelse(df1.test$predict_probs < 0.5, "No", "Yes")
+cm_test_pca <- table(df1.test$treatment, df1.test$predict, dnn = c("real", "predict"))
+cm_test_pca
+
+```
+
+The Accuracy on test dataset is \~ 70%
+
+```{r}
+prob_pca=predict(lm_train_pca_final,type="response", newdata = df1.test)
+lrpred_pca = prediction(prob_pca, df1.test$treatment)
+lrperf_pca <- performance(lrpred_pca,"tpr","fpr")
+lrperf2_pca <- performance(lrpred_pca,measure = "auc")
+plot(lrperf_pca, main="ROC", colorize=T)
+plot(lrperf_pca, col=3, add=TRUE)
+
+```
+
+```{r}
+#AUC Score 
+as.numeric(lrperf2_pca@y.values)
+
+```
+
+The AUC score decreased from 80% to 75%.
+
+#### 6.3.2 Using PCA with Random Forest Classifier
+
+```{r}
+
+
+rf_pca.trained <- randomForest( treatment~ anonymity+benefits+seek_help+family_history_cat+wellness_program+care_options, data = df1.train, ntree = 500, importance = TRUE)
+
+#install.packages("ROCR")
+library(ROCR)
+library(ipred)
+rf_pca_predicted = predict(rf_pca.trained, type = "prob", newdata = df1.test)
+forest_pca_pred = prediction(rf_pca_predicted[,2], df1.test$treatment)
+forest_pca_perf <- performance(forest_pca_pred,"tpr","fpr")
+forest_pca_perf2 <- performance(forest_pca_pred,measure = "auc")
+plot(forest_pca_perf, main="ROC", colorize=T)
+plot(forest_pca_perf, col=3, add=TRUE)
+```
+
+#### 
+
+```{r}
+#AUC Score 
+as.numeric(forest_pca_perf2@y.values)
+
+```
+
+The AUC score has decreased from 78% to 75%.
+
+#### 6.3.2 Using PCA with Bagged Trees
+
+```{r}
+
+bag_pca.trained <- bagging(treatment~ anonymity+benefits+seek_help+family_history_cat+wellness_program+care_options, data = df1.train, coob=T)
+print(bag_pca.trained)
+```
+
+The OOBE decreased by 1%.
+
+```{r}
+df1.test.bag_pca.prob = predict(bag_pca.trained, type = "prob", newdata = df1.test)
+bagpred = prediction(df1.test.bag_pca.prob[,2], df1.test$treatment_cat)
+bagperf_pca = performance(bagpred, "tpr", "fpr")
+bagperf2_pca <- performance(bagpred,measure = "auc")
+plot(bagperf_pca, main="ROC", colorize=T)
+plot(bagperf_pca, col=2, add=TRUE)
+auc.curve = performance(bagpred, "auc")
+
+
+```
+
+```{r}
+#AUC Score 
+as.numeric(bagperf2_pca@y.values)
+```
+
+The AUC score of the bagged trees classifier increased from 74% to 75.3%.
+
+```{r}
+
+plot(forest_pca_perf, main="ROC -  PCA selected features", colorize=T)
+plot(forest_pca_perf, col=3, add=TRUE)
+plot(lrperf_pca, col=1, add=TRUE)
+plot(bagperf_pca, col=2, add=TRUE)
+legend(0.6, 0.6, c( 'Logistic Model',  'Bagged Trees', 'Random Forest' ), 1:3)
+abline(0, 1,lty=2)
+```
+
+#### 6.3.3 Comparing with Boosted Trees
+
+```{r}
+#install.packages("gbm")
+library(gbm)
+set.seed (1)
+```
+
+```{r}
+
+boosted=gbm(treatment_cat~ Age+Gender+country+no_employees+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+self_employed_cat+family_history_cat+remote_work_cat+tech_company_cat+obs_consequence_cat,data=df1.train,distribution="bernoulli",n.trees=100, interaction.depth=3)
+
+
+summary(boosted)
+```
+
+The above summary and/or the feature importance plot displays the most important variable(s) on the top and the least important variable which is at the bottom, as described by rel_inf that shows the relative influence each variable had on the the model predictions. The most important features can be explained by the maximum variance in the Data set which is Age while the least most important features are tech_company_cat and self_employed_cat.
+
+```{r}
+predicted_score= predict(boosted, newdata=df1.test, n.trees=100, type="response")
+boostpred = prediction(predicted_score, df1.test$treatment_cat)
+boostperf <- performance(boostpred,"tpr","fpr")
+boostperf2 <- performance(boostpred,measure = "auc")
+plot(boostperf, main="ROC", colorize=T)
+plot(boostperf, col=3, add=TRUE)
+```
+
+```{r}
+#AUC Score 
+as.numeric(boostperf2@y.values)
+```
+
+```{r}
+df1.test$treatment_req=ifelse(predicted_score>0.5, 1,0)
+#Calculating the Accuracy
+mean(df1.test$treatment_req==df1.test$treatment_cat)
+
+#Calculating the MSE
+mean((predicted_score -df1.test$treatment_cat)^2) 
+```
+
+Using only 100 boosted trees, we could get an AUC score of 80% and an accuracy of 72% on the test dataset.
+
+```{r}
+plot(forest_pca_perf, main="ROC -  PCA selected features & Boosting", colorize=T)
+plot(forest_pca_perf, col=3, add=TRUE)
+plot(lrperf_pca, col=1, add=TRUE)
+plot(boostperf, col=2, add=TRUE)
+plot(bagperf_pca, col=4, add=TRUE)
+legend(0.6, 0.6, c( 'Logistic Model','Boosted trees', 'Random Forest', 'Bagged Trees' ), 1:4)
+abline(0, 1,lty=2)
+```
+
+Therefore for our choice of final model, we will using Boosted trees since it gave us the highest AUC score of 80%.
+
+## 7. Final Model
+
+```{r}
+#training it on the whole dataset 
+final_model=gbm(treatment_cat~ Age+Gender+country+no_employees+benefits+care_options+wellness_program+seek_help+anonymity+leave+mental_health_consequence+phys_health_consequence+coworkers+supervisor+mental_vs_physical+self_employed_cat+family_history_cat+remote_work_cat+tech_company_cat+obs_consequence_cat,data=df1.train,distribution="bernoulli",n.trees=100, interaction.depth=3)
+summary(final_model)
+
+```
+
+```{r}
+final_model
+```
